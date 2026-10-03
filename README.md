@@ -4,6 +4,10 @@ FiveM standalone 리소스 스캐폴딩. `기획서`/`개발사양서` PDF의 RE
 
 ## 리소스 설치
 
+다른 사람이 자기 서버에 이 모드를 새로 설치하려는 경우, 라이선스 키 발급부터
+server.cfg 설정, 배포 전 체크리스트까지 전체 과정을 담은 [INSTALL.md](INSTALL.md)를
+먼저 참고할 것. 아래는 핵심 요약이다.
+
 `resources/[local]/` 아래에 이 폴더를 통째로 복사하고 `server.cfg`에 추가:
 
 ```
