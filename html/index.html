@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>SecretBag HUD</title>
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        font-family: 'Bahnschrift', 'Segoe UI', Arial, sans-serif;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    /* 게임 입력을 가리지 않는 순수 HUD 오버레이. SetNuiFocus를 호출하지 않으므로
+       클릭/키 입력은 전부 게임으로 그대로 전달된다. */
+    #hud {
+        position: absolute;
+        top: 3.5vh;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none; /* stateChanged로 RUNNING 계열일 때만 표시 */
+        align-items: flex-start;
+        gap: 28px;
+        pointer-events: none;
+        text-align: center;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55), 0 0 1px rgba(0, 0, 0, 0.4);
+    }
+
+    #hud.visible {
+        display: flex;
+    }
+
+    #clockBlock {
+        min-width: 140px;
+    }
+
+    #clock {
+        font-size: 24pt;
+        font-weight: 700;
+        color: #ffffff;
+        letter-spacing: 2px;
+        line-height: 1.1;
+    }
+
+    #status {
+        margin-top: 2px;
+        font-size: 11pt;
+        font-weight: 400;
+        color: #e6e6e6;
+        white-space: nowrap;
+    }
+
+    #nextEventBlock {
+        margin-top: 4px;
+        min-width: 90px;
+        text-align: center;
+    }
+
+    #nextEventTime {
+        font-size: 13pt;
+        font-weight: 600;
+        color: #ffffff;
+        line-height: 1.1;
+    }
+
+    #nextEventLabel {
+        margin-top: 1px;
+        font-size: 10pt;
+        font-weight: 400;
+        color: #d8d8d8;
+        white-space: nowrap;
+    }
+
+    /* 인벤토리 창(client/main.lua의 /sbinventory, 기본 I키). HUD와 달리 SetNuiFocus(true,true)로
+       열리므로 마우스 클릭을 받는다 — pointer-events를 켜둬야 한다. */
+    #inventory {
+        position: absolute;
+        top: 50%;
+        right: 4vw;
+        transform: translateY(-50%);
+        display: none;
+        width: 320px;
+        max-height: 78vh;
+        background: rgba(20, 20, 22, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 14px;
+        box-sizing: border-box;
+        color: #f0f0f0;
+        font-family: 'Bahnschrift', 'Segoe UI', Arial, sans-serif;
+        pointer-events: auto;
+    }
+
+    #inventory.visible {
+        display: flex;
+        flex-direction: column;
+    }
+
+    #inventory h2 {
+        margin: 0 0 10px 0;
+        font-size: 14pt;
+        font-weight: 700;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    #inventoryClose {
+        cursor: pointer;
+        font-size: 11pt;
+        color: #cfcfcf;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 4px;
+        padding: 2px 8px;
+    }
+
+    #inventoryClose:hover {
+        background: rgba(255, 255, 255, 0.18);
+    }
+
+    .invSection {
+        margin-bottom: 12px;
+        overflow-y: auto;
+    }
+
+    .invSectionTitle {
+        font-size: 10pt;
+        color: #b7b7b7;
+        margin-bottom: 6px;
+        letter-spacing: 1px;
+    }
+
+    .invEmpty {
+        font-size: 9.5pt;
+        color: #8a8a8a;
+        padding: 4px 0;
+    }
+
+    .invRow {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        font-size: 10pt;
+    }
+
+    .invRowText {
+        margin-bottom: 6px;
+        line-height: 1.35;
+        word-break: break-word;
+    }
+
+    .invRowActions {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+    }
+
+    .invBtn {
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 4px;
+        color: #f0f0f0;
+        font-size: 9pt;
+        padding: 4px 8px;
+    }
+
+    .invBtn:hover {
+        background: rgba(255, 255, 255, 0.22);
+    }
+
+    .invTargetInput {
+        width: 46px;
+        font-size: 9pt;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.3);
+        color: #f0f0f0;
+        padding: 3px 4px;
+    }
+
+    /* 근접 상호작용 프롬프트 (client/main.lua E키 루프). 게임 입력을 가리면 안 되므로
+       pointer-events:none — HUD와 동일한 순수 오버레이. */
+    #interactPrompt {
+        position: absolute;
+        bottom: 14vh;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        background: rgba(0, 0, 0, 0.55);
+        color: #ffffff;
+        font-size: 12pt;
+        font-weight: 600;
+        padding: 6px 16px;
+        border-radius: 6px;
+        pointer-events: none;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+        white-space: nowrap;
+    }
+
+    #interactPrompt.visible {
+        display: block;
+    }
+
+    /* 전화기 창(client/main.lua의 /sbphone, 기본 M키). 인벤토리와 대칭으로 반대편(왼쪽)에 뜬다 —
+       둘 다 화면 우측/좌측 각각에 있어 실수로 서로 겹치지 않는다(둘 다 한쪽만 동시에 열리긴 하지만). */
+    #phone {
+        position: absolute;
+        top: 50%;
+        left: 4vw;
+        transform: translateY(-50%);
+        display: none;
+        width: 300px;
+        max-height: 78vh;
+        background: rgba(20, 20, 22, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 14px;
+        box-sizing: border-box;
+        color: #f0f0f0;
+        font-family: 'Bahnschrift', 'Segoe UI', Arial, sans-serif;
+        pointer-events: auto;
+    }
+
+    #phone.visible {
+        display: flex;
+        flex-direction: column;
+    }
+
+    #phone h2 {
+        margin: 0 0 10px 0;
+        font-size: 14pt;
+        font-weight: 700;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    #phoneClose {
+        cursor: pointer;
+        font-size: 11pt;
+        color: #cfcfcf;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 4px;
+        padding: 2px 8px;
+    }
+
+    #phoneClose:hover {
+        background: rgba(255, 255, 255, 0.18);
+    }
+
+    #phoneMessage {
+        font-size: 9pt;
+        color: #9fd89f;
+        margin-bottom: 8px;
+        min-height: 12px;
+    }
+
+    .phoneEmpty {
+        font-size: 9.5pt;
+        color: #8a8a8a;
+        padding: 4px 0;
+    }
+
+    .phoneRow {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        font-size: 10pt;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .phoneRow span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .phoneBtn {
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 4px;
+        color: #f0f0f0;
+        font-size: 9pt;
+        padding: 5px 10px;
+        flex-shrink: 0;
+    }
+
+    .phoneBtn:hover {
+        background: rgba(255, 255, 255, 0.22);
+    }
+
+    .phoneBtnAccept {
+        background: rgba(60, 170, 90, 0.4);
+    }
+
+    .phoneBtnAccept:hover {
+        background: rgba(60, 170, 90, 0.6);
+    }
+
+    .phoneBtnDecline, .phoneBtnEnd {
+        background: rgba(200, 60, 60, 0.4);
+    }
+
+    .phoneBtnDecline:hover, .phoneBtnEnd:hover {
+        background: rgba(200, 60, 60, 0.6);
+    }
+
+    .phoneCallScreen {
+        text-align: center;
+        padding: 26px 6px 10px;
+    }
+
+    .phoneCallLabel {
+        font-size: 9.5pt;
+        color: #b7b7b7;
+        margin-bottom: 6px;
+    }
+
+    .phoneCallName {
+        font-size: 15pt;
+        font-weight: 700;
+        margin-bottom: 20px;
+        word-break: break-word;
+    }
+
+    .phoneActions {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+    }
+</style>
+</head>
+<body>
+    <div id="hud">
+        <div id="clockBlock">
+            <div id="clock">00:00</div>
+            <div id="status"></div>
+        </div>
+        <div id="nextEventBlock">
+            <div id="nextEventTime">--:--</div>
+            <div id="nextEventLabel"></div>
+        </div>
+    </div>
+
+    <div id="interactPrompt"></div>
+
+    <div id="inventory">
+        <h2>인벤토리 <span id="inventoryClose">닫기 (ESC)</span></h2>
+        <div class="invSection">
+            <div class="invSectionTitle">가방</div>
+            <div id="bagList"></div>
+        </div>
+        <div class="invSection">
+            <div class="invSectionTitle">쪽지</div>
+            <div id="noteList"></div>
+        </div>
+    </div>
+
+    <div id="phone">
+        <h2>전화 <span id="phoneClose">닫기 (ESC)</span></h2>
+        <div id="phoneBody"></div>
+    </div>
+
+<script>
+    // server/startgame.lua의 secretbag:timelineSync가 보낸 스냅샷을 기준으로,
+    // 이후 초 단위 흐름은 클라이언트(JS)가 자체적으로 셈한다 — 매초 서버가 전체
+    // 인원에게 브로드캐스트할 필요가 없어 네트워크 낭비가 없다. 서버와의 오차는
+    // HUD 표시 목적상 무시 가능한 수준이다(재접속/기능 on-off 시 재동기화됨).
+    let syncedAtPerf = null; // performance.now() 기준, timelineSync 수신 시점
+    let elapsedMsAtSync = 0;
+    let upcomingEvents = []; // [{ atMinute, label }], atMinute 오름차순
+    let tickTimer = null;
+
+    // 사용자 요청: 경찰 시스템을 더 이상 쓰지 않으므로, 시계 아래 안내문(#status)은
+    // 진짜 감정사 출근/이용 가능 상태를 보여준다. trueApprSpawnAtMin이 null이면
+    // (기능 꺼짐) 안내문을 비운다. trueApprCooldownEndMs는 elapsedMs 기준 절대 시각.
+    let trueApprSpawnAtMin = null;
+    let trueApprCooldownEndMs = null;
+
+    function formatClock(totalMs) {
+        const totalSeconds = Math.max(0, Math.floor(totalMs / 1000));
+        const m = Math.floor(totalSeconds / 60);
+        const s = totalSeconds % 60;
+        return String(m).padStart(2, '0') + ' : ' + String(s).padStart(2, '0');
+    }
+
+    function formatCountdown(totalMs) {
+        const totalSeconds = Math.max(0, Math.floor(totalMs / 1000));
+        const m = Math.floor(totalSeconds / 60);
+        const s = totalSeconds % 60;
+        return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    }
+
+    function tick() {
+        if (syncedAtPerf === null) return;
+        const elapsedMs = elapsedMsAtSync + (performance.now() - syncedAtPerf);
+
+        document.getElementById('clock').textContent = formatClock(elapsedMs);
+
+        let next = null;
+        for (const evt of upcomingEvents) {
+            if (evt.atMinute * 60000 > elapsedMs) { next = evt; break; }
+        }
+        const timeEl = document.getElementById('nextEventTime');
+        const labelEl = document.getElementById('nextEventLabel');
+        if (next) {
+            timeEl.textContent = formatCountdown(next.atMinute * 60000 - elapsedMs);
+            labelEl.textContent = next.label;
+        } else {
+            timeEl.textContent = '--:--';
+            labelEl.textContent = '';
+        }
+
+        document.getElementById('status').textContent = computeTrueApprStatus(elapsedMs);
+    }
+
+    // "X:XX"는 진행 중인 상단 시계(#clock)와 같은 mm:ss 기준 절대 시각이다(카운트다운이
+    // 아니라 "그 시각에 도달하면"이라는 뜻) — 출근 전에는 등장 시각을, 재이용 대기 중에는
+    // 쿨다운이 끝나는 시각을 그대로 보여준다.
+    function computeTrueApprStatus(elapsedMs) {
+        if (trueApprSpawnAtMin === null) return ''; // 기능 꺼짐
+        const spawnMs = trueApprSpawnAtMin * 60000;
+        if (elapsedMs < spawnMs) {
+            return formatCountdown(spawnMs) + '에 진짜 감정사 출근';
+        }
+        if (trueApprCooldownEndMs !== null && elapsedMs < trueApprCooldownEndMs) {
+            return formatCountdown(trueApprCooldownEndMs) + '에 진짜 감정사 재이용 가능';
+        }
+        return '진짜 감정사 이용 가능';
+    }
+
+    function startTicking() {
+        if (tickTimer) clearInterval(tickTimer);
+        tick();
+        tickTimer = setInterval(tick, 1000);
+    }
+
+    window.addEventListener('message', function (event) {
+        const data = event.data || {};
+        if (data.type === 'show') {
+            document.getElementById('hud').classList.add('visible');
+        } else if (data.type === 'hide') {
+            document.getElementById('hud').classList.remove('visible');
+            if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+            syncedAtPerf = null;
+        } else if (data.type === 'timelineSync') {
+            elapsedMsAtSync = data.elapsedMs || 0;
+            upcomingEvents = (data.events || []).slice().sort(function (a, b) { return a.atMinute - b.atMinute; });
+            trueApprSpawnAtMin = (data.trueApprSpawnAtMin === undefined || data.trueApprSpawnAtMin === null) ? null : data.trueApprSpawnAtMin;
+            trueApprCooldownEndMs = null; // 새 세션 동기화 시점엔 쿨다운 없음(곧이어 trueApprCooldown이 필요하면 다시 채움).
+            syncedAtPerf = performance.now();
+            startTicking();
+        } else if (data.type === 'trueApprCooldown') {
+            trueApprCooldownEndMs = (data.endElapsedMs === undefined || data.endElapsedMs === null) ? null : data.endElapsedMs;
+        } else if (data.type === 'invShow') {
+            document.getElementById('inventory').classList.add('visible');
+        } else if (data.type === 'invHide') {
+            document.getElementById('inventory').classList.remove('visible');
+        } else if (data.type === 'invSync') {
+            renderInventory(data.bags || [], data.notes || []);
+        } else if (data.type === 'promptShow') {
+            const prompt = document.getElementById('interactPrompt');
+            prompt.textContent = data.text || '';
+            prompt.classList.add('visible');
+        } else if (data.type === 'promptHide') {
+            document.getElementById('interactPrompt').classList.remove('visible');
+        } else if (data.type === 'phoneShow') {
+            document.getElementById('phone').classList.add('visible');
+        } else if (data.type === 'phoneHide') {
+            document.getElementById('phone').classList.remove('visible');
+        } else if (data.type === 'phoneRoster') {
+            renderPhoneRoster(data.roster, data.message);
+        } else if (data.type === 'phoneIncoming') {
+            renderPhoneCallScreen('수신 전화', data.callerName, [
+                { label: '받기', cls: 'phoneBtnAccept', onClick: function () { postNUI('phoneAccept', {}); } },
+                { label: '거절', cls: 'phoneBtnDecline', onClick: function () { postNUI('phoneHangup', {}); } },
+            ]);
+        } else if (data.type === 'phoneRinging') {
+            renderPhoneCallScreen('거는 중...', data.targetName, [
+                { label: '취소', cls: 'phoneBtnEnd', onClick: function () { postNUI('phoneHangup', {}); } },
+            ]);
+        } else if (data.type === 'phoneConnected') {
+            renderPhoneCallScreen('통화 중', data.partnerName, [
+                { label: '종료', cls: 'phoneBtnEnd', onClick: function () { postNUI('phoneHangup', {}); } },
+            ]);
+        }
+    });
+
+    // client/main.lua가 RegisterNUICallback으로 받는다 (invClose/invDropBag/invDropNote/invGiveNote).
+    function postNUI(name, payload) {
+        fetch('https://' + GetParentResourceName() + '/' + name, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+            body: JSON.stringify(payload || {}),
+        }).catch(function () {});
+    }
+
+    function makeButton(label, action) {
+        const btn = document.createElement('button');
+        btn.className = 'invBtn';
+        btn.textContent = label;
+        btn.addEventListener('click', action);
+        return btn;
+    }
+
+    // note.text는 initialFakeOwner 힌트류에 GetPlayerName(플레이어가 직접 정한 닉네임)을
+    // 그대로 포함한다(server/hint.lua H.TextFor) — innerHTML로 꽂으면 악의적인 닉네임(예:
+    // "<img src=x onerror=...>")이 이 NUI 페이지 안에서 그대로 실행될 수 있어, 반드시
+    // textContent로만 다뤄 HTML로 해석되지 않게 한다.
+    function renderInventory(bags, notes) {
+        const bagList = document.getElementById('bagList');
+        const noteList = document.getElementById('noteList');
+        bagList.innerHTML = '';
+        noteList.innerHTML = '';
+
+        if (bags.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'invEmpty';
+            empty.textContent = '소지한 가방이 없습니다.';
+            bagList.appendChild(empty);
+        } else {
+            bags.forEach(function (bag) {
+                const row = document.createElement('div');
+                row.className = 'invRow';
+
+                const text = document.createElement('div');
+                text.className = 'invRowText';
+                text.textContent = 'SecretBag (' + String(bag.bagId).slice(-8) + ')';
+
+                const actions = document.createElement('div');
+                actions.className = 'invRowActions';
+                actions.appendChild(makeButton('버리기', function () {
+                    postNUI('invDropBag', { bagId: bag.bagId });
+                }));
+
+                row.appendChild(text);
+                row.appendChild(actions);
+                bagList.appendChild(row);
+            });
+        }
+
+        if (notes.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'invEmpty';
+            empty.textContent = '소지한 쪽지가 없습니다.';
+            noteList.appendChild(empty);
+        } else {
+            notes.forEach(function (note) {
+                const row = document.createElement('div');
+                row.className = 'invRow';
+
+                const text = document.createElement('div');
+                text.className = 'invRowText';
+                text.textContent = note.text || '';
+
+                const actions = document.createElement('div');
+                actions.className = 'invRowActions';
+
+                const targetInput = document.createElement('input');
+                targetInput.className = 'invTargetInput';
+                targetInput.type = 'number';
+                targetInput.placeholder = 'ID';
+
+                actions.appendChild(targetInput);
+                actions.appendChild(makeButton('전달', function () {
+                    const targetId = targetInput.value;
+                    if (!targetId) return;
+                    postNUI('invGiveNote', { noteId: note.noteId, targetId: targetId });
+                }));
+                actions.appendChild(makeButton('버리기', function () {
+                    postNUI('invDropNote', { noteId: note.noteId });
+                }));
+
+                row.appendChild(text);
+                row.appendChild(actions);
+                noteList.appendChild(row);
+            });
+        }
+    }
+
+    document.getElementById('inventoryClose').addEventListener('click', function () {
+        postNUI('invClose', {});
+    });
+
+    // 전화번호부/발신·수신/통화중 화면 전부 이 하나의 #phoneBody를 그때그때 다시 그려서 표현한다.
+    // 이름(name)은 서버가 GetPlayerName으로 넘긴, 플레이어가 직접 정한 닉네임이라 textContent로만
+    // 다룬다(renderInventory의 note.text와 동일한 이유 — innerHTML로 꽂으면 악의적인 닉네임이
+    // 이 NUI 페이지 안에서 그대로 실행될 수 있다).
+    function renderPhoneRoster(roster, message) {
+        const body = document.getElementById('phoneBody');
+        body.innerHTML = '';
+
+        const msg = document.createElement('div');
+        msg.id = 'phoneMessage';
+        msg.textContent = message || '';
+        body.appendChild(msg);
+
+        if (!roster || roster.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'phoneEmpty';
+            empty.textContent = '현재 접속 중인 다른 사람이 없습니다.';
+            body.appendChild(empty);
+            return;
+        }
+
+        roster.forEach(function (p) {
+            const row = document.createElement('div');
+            row.className = 'phoneRow';
+
+            const nameEl = document.createElement('span');
+            nameEl.textContent = (p.name || ('#' + p.id)) + ' (#' + p.id + ')';
+
+            const callBtn = document.createElement('button');
+            callBtn.className = 'phoneBtn';
+            callBtn.textContent = '전화 걸기';
+            callBtn.addEventListener('click', function () {
+                postNUI('phoneCall', { targetId: p.id });
+            });
+
+            row.appendChild(nameEl);
+            row.appendChild(callBtn);
+            body.appendChild(row);
+        });
+    }
+
+    function renderPhoneCallScreen(label, name, actions) {
+        const body = document.getElementById('phoneBody');
+        body.innerHTML = '';
+
+        const wrap = document.createElement('div');
+        wrap.className = 'phoneCallScreen';
+
+        const labelEl = document.createElement('div');
+        labelEl.className = 'phoneCallLabel';
+        labelEl.textContent = label;
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'phoneCallName';
+        nameEl.textContent = name || '알 수 없음';
+
+        const actionsEl = document.createElement('div');
+        actionsEl.className = 'phoneActions';
+        actions.forEach(function (a) {
+            const btn = document.createElement('button');
+            btn.className = 'phoneBtn ' + (a.cls || '');
+            btn.textContent = a.label;
+            btn.addEventListener('click', a.onClick);
+            actionsEl.appendChild(btn);
+        });
+
+        wrap.appendChild(labelEl);
+        wrap.appendChild(nameEl);
+        wrap.appendChild(actionsEl);
+        body.appendChild(wrap);
+    }
+
+    document.getElementById('phoneClose').addEventListener('click', function () {
+        postNUI('phoneClose', {});
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        if (document.getElementById('inventory').classList.contains('visible')) {
+            postNUI('invClose', {});
+        }
+        if (document.getElementById('phone').classList.contains('visible')) {
+            postNUI('phoneClose', {});
+        }
+    });
+</script>
+</body>
+</html>
